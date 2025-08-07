@@ -6,6 +6,7 @@
 (define-constant err-task-exists (err u103))
 (define-constant err-task-closed (err u104))
 (define-constant err-invalid-submission (err u105))
+(define-constant err-task-completed (err u106))
 
 ;; Define data vars
 (define-data-var token-name (string-ascii 32) "SCIENCE")
@@ -97,6 +98,7 @@
     (let (
             (task (unwrap! (map-get? tasks { task-id: task-id }) err-not-found))
             (current-block burn-block-height)
+            (new-observation-count (+ u1 (get current-observations task)))
         )
         (asserts! (is-eq (get status task) "ACTIVE") err-task-closed)
         (asserts! (<= current-block (get deadline task)) err-task-closed)
@@ -109,8 +111,16 @@
             status: "PENDING",
             verified: false,
         })
-        (map-set tasks { task-id: task-id }
-            (merge task { current-observations: (+ u1 (get current-observations task)) })
+        (if (>= new-observation-count (get required-observations task))
+            (map-set tasks { task-id: task-id }
+                (merge task {
+                    current-observations: new-observation-count,
+                    status: "COMPLETED",
+                })
+            )
+            (map-set tasks { task-id: task-id }
+                (merge task { current-observations: new-observation-count })
+            )
         )
         (ok true)
     )
@@ -164,4 +174,11 @@
 
 (define-read-only (get-balance (user principal))
     (default-to u0 (get balance (map-get? balances { owner: user })))
+)
+
+(define-read-only (is-task-completed (task-id uint))
+    (match (map-get? tasks { task-id: task-id })
+        task (>= (get current-observations task) (get required-observations task))
+        false
+    )
 )
