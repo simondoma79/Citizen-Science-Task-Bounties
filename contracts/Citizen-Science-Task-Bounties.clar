@@ -8,12 +8,26 @@
 (define-constant err-invalid-submission (err u105))
 (define-constant err-task-completed (err u106))
 (define-constant err-insufficient-reputation (err u107))
+(define-constant err-invalid-category (err u108))
+(define-constant err-category-exists (err u109))
+(define-constant err-category-inactive (err u110))
+
+;; Category constants
+(define-constant category-biology "BIOLOGY")
+(define-constant category-environmental "ENVIRONMENTAL")
+(define-constant category-astronomy "ASTRONOMY")
+(define-constant category-meteorology "METEOROLOGY")
+(define-constant category-geology "GEOLOGY")
+(define-constant category-physics "PHYSICS")
+(define-constant category-chemistry "CHEMISTRY")
+(define-constant category-ecology "ECOLOGY")
 
 ;; Define data vars
 (define-data-var token-name (string-ascii 32) "SCIENCE")
 (define-data-var token-symbol (string-ascii 10) "SCI")
 (define-data-var token-uri (optional (string-utf8 256)) none)
 (define-data-var total-supply uint u0)
+(define-data-var category-counter uint u8)
 
 ;; Define data maps
 (define-map tasks
@@ -28,6 +42,25 @@
         required-observations: uint,
         current-observations: uint,
         min-reputation: uint,
+        category: (string-ascii 20),
+    }
+)
+
+(define-map categories
+    { name: (string-ascii 20) }
+    {
+        active: bool,
+        description: (string-utf8 200),
+        created-at: uint,
+    }
+)
+
+(define-map category-stats
+    { category: (string-ascii 20) }
+    {
+        total-tasks: uint,
+        active-tasks: uint,
+        completed-tasks: uint,
     }
 )
 
@@ -58,6 +91,85 @@
     }
 )
 
+;; Initialize default categories
+(map-set categories { name: category-biology } {
+    active: true,
+    description: u"Biological research and observations",
+    created-at: u0,
+})
+(map-set categories { name: category-environmental } {
+    active: true,
+    description: u"Environmental monitoring and studies",
+    created-at: u0,
+})
+(map-set categories { name: category-astronomy } {
+    active: true,
+    description: u"Astronomical observations and research",
+    created-at: u0,
+})
+(map-set categories { name: category-meteorology } {
+    active: true,
+    description: u"Weather and climate observations",
+    created-at: u0,
+})
+(map-set categories { name: category-geology } {
+    active: true,
+    description: u"Geological and earth science studies",
+    created-at: u0,
+})
+(map-set categories { name: category-physics } {
+    active: true,
+    description: u"Physics experiments and observations",
+    created-at: u0,
+})
+(map-set categories { name: category-chemistry } {
+    active: true,
+    description: u"Chemistry research and analysis",
+    created-at: u0,
+})
+(map-set categories { name: category-ecology } {
+    active: true,
+    description: u"Ecological research and biodiversity studies",
+    created-at: u0,
+})
+
+;; Category management functions
+(define-public (add-category
+        (name (string-ascii 20))
+        (description (string-utf8 200))
+    )
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (is-none (map-get? categories { name: name })) err-category-exists)
+        (map-set categories { name: name } {
+            active: true,
+            description: description,
+            created-at: burn-block-height,
+        })
+        (map-set category-stats { category: name } {
+            total-tasks: u0,
+            active-tasks: u0,
+            completed-tasks: u0,
+        })
+        (var-set category-counter (+ (var-get category-counter) u1))
+        (ok true)
+    )
+)
+
+(define-public (toggle-category-status
+        (name (string-ascii 20))
+    )
+    (let (
+            (category (unwrap! (map-get? categories { name: name }) err-not-found))
+        )
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (map-set categories { name: name }
+            (merge category { active: (not (get active category)) })
+        )
+        (ok true)
+    )
+)
+
 ;; SIP-010 transfer function
 (define-public (transfer
         (amount uint)
@@ -83,10 +195,22 @@
         (deadline uint)
         (required-observations uint)
         (min-reputation uint)
+        (category (string-ascii 20))
     )
-    (let ((task-id (+ u1 (var-get total-supply))))
+    (let (
+            (task-id (+ u1 (var-get total-supply)))
+            (category-info (unwrap! (map-get? categories { name: category }) err-invalid-category))
+            (current-stats (default-to {
+                total-tasks: u0,
+                active-tasks: u0,
+                completed-tasks: u0,
+            }
+                (map-get? category-stats { category: category })
+            ))
+        )
         (asserts! (> reward u0) err-invalid-amount)
         (asserts! (> deadline burn-block-height) err-invalid-amount)
+        (asserts! (get active category-info) err-category-inactive)
         (map-set tasks { task-id: task-id } {
             title: title,
             description: description,
@@ -97,6 +221,12 @@
             required-observations: required-observations,
             current-observations: u0,
             min-reputation: min-reputation,
+            category: category,
+        })
+        (map-set category-stats { category: category } {
+            total-tasks: (+ (get total-tasks current-stats) u1),
+            active-tasks: (+ (get active-tasks current-stats) u1),
+            completed-tasks: (get completed-tasks current-stats),
         })
         (var-set total-supply task-id)
         (ok task-id)
@@ -129,10 +259,25 @@
             verified: false,
         })
         (if (>= new-observation-count (get required-observations task))
-            (map-set tasks { task-id: task-id }
-                (merge task {
-                    current-observations: new-observation-count,
-                    status: "COMPLETED",
+            (let (
+                    (current-stats (default-to {
+                        total-tasks: u0,
+                        active-tasks: u0,
+                        completed-tasks: u0,
+                    }
+                        (map-get? category-stats { category: (get category task) })
+                    ))
+                )
+                (map-set tasks { task-id: task-id }
+                    (merge task {
+                        current-observations: new-observation-count,
+                        status: "COMPLETED",
+                    })
+                )
+                (map-set category-stats { category: (get category task) } {
+                    total-tasks: (get total-tasks current-stats),
+                    active-tasks: (- (get active-tasks current-stats) u1),
+                    completed-tasks: (+ (get completed-tasks current-stats) u1),
                 })
             )
             (map-set tasks { task-id: task-id }
@@ -268,4 +413,60 @@
     }
         (map-get? reputation { user: user })
     )
+)
+
+;; Category-related read-only functions
+(define-read-only (get-category (name (string-ascii 20)))
+    (map-get? categories { name: name })
+)
+
+(define-read-only (is-category-active (name (string-ascii 20)))
+    (match (map-get? categories { name: name })
+        category (get active category)
+        false
+    )
+)
+
+(define-read-only (get-category-stats (category (string-ascii 20)))
+    (default-to {
+        total-tasks: u0,
+        active-tasks: u0,
+        completed-tasks: u0,
+    }
+        (map-get? category-stats { category: category })
+    )
+)
+
+(define-read-only (get-task-by-id-and-check-category 
+        (task-id uint)
+        (category (string-ascii 20))
+    )
+    (match (map-get? tasks { task-id: task-id })
+        task (if (is-eq (get category task) category)
+            (some task)
+            none
+        )
+        none
+    )
+)
+
+(define-read-only (is-task-in-category
+        (task-id uint)
+        (category (string-ascii 20))
+    )
+    (match (map-get? tasks { task-id: task-id })
+        task (is-eq (get category task) category)
+        false
+    )
+)
+
+(define-read-only (get-task-category (task-id uint))
+    (match (map-get? tasks { task-id: task-id })
+        task (some (get category task))
+        none
+    )
+)
+
+(define-read-only (count-tasks-in-category (category (string-ascii 20)))
+    (get total-tasks (get-category-stats category))
 )
