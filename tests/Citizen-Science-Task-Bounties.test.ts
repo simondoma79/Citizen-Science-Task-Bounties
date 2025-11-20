@@ -1,13 +1,14 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeAll } from 'vitest';
 import { Cl } from '@stacks/transactions';
 import { initSimnet } from '@hirosystems/clarinet-sdk';
 
-const simnet = initSimnet();
+let simnet: any;
+
+beforeAll(async () => {
+  simnet = await initSimnet();
+});
 
 describe('Citizen Science Task Bounties - Categories System', () => {
-  beforeEach(async () => {
-    // Reset simnet state before each test
-  });
 
   it('can create task with category and submit observation', () => {
     const accounts = simnet.getAccounts();
@@ -19,8 +20,8 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'Citizen-Science-Task-Bounties',
       'create-task',
       [
-        Cl.utf8('Bird Count'),
-        Cl.utf8('Count birds in your backyard'),
+        Cl.stringUtf8('Bird Count'),
+        Cl.stringUtf8('Count birds in your backyard'),
         Cl.uint(100),
         Cl.uint(30),
         Cl.uint(5),
@@ -38,7 +39,7 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'submit-observation',
       [
         Cl.uint(1),
-        Cl.utf8('Observed 5 sparrows')
+        Cl.stringUtf8('Observed 5 sparrows')
       ],
       user1
     );
@@ -58,7 +59,7 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       [Cl.stringAscii('BIOLOGY')],
       deployer
     );
-    expect(getCategoryResult.result).toBeSome();
+    expect(getCategoryResult.result).toBeDefined();
 
     // Test checking category activity
     const isActiveResult = simnet.callReadOnlyFn(
@@ -75,23 +76,22 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'add-category',
       [
         Cl.stringAscii('MARINE_BIOLOGY'),
-        Cl.utf8('Study of marine life and ecosystems')
+        Cl.stringUtf8('Study of marine life and ecosystems')
       ],
       deployer
     );
     expect(addCategoryResult.result).toBeOk(Cl.bool(true));
 
-    // Test non-owner cannot add category
     const unauthorizedResult = simnet.callPublicFn(
       'Citizen-Science-Task-Bounties',
       'add-category',
       [
         Cl.stringAscii('UNAUTHORIZED'),
-        Cl.utf8('This should fail')
+        Cl.stringUtf8('This should fail')
       ],
       user1
     );
-    expect(unauthorizedResult.result).toBeErr(Cl.uint(100)); // err-owner-only
+    expect(unauthorizedResult.result).toBeErr(Cl.uint(100));
   });
 
   it('tracks category statistics correctly', () => {
@@ -103,8 +103,8 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'Citizen-Science-Task-Bounties',
       'create-task',
       [
-        Cl.utf8('Plant Growth Study'),
-        Cl.utf8('Monitor plant growth over 4 weeks'),
+        Cl.stringUtf8('Plant Growth Study'),
+        Cl.stringUtf8('Monitor plant growth over 4 weeks'),
         Cl.uint(200),
         Cl.uint(50),
         Cl.uint(3),
@@ -156,8 +156,8 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'Citizen-Science-Task-Bounties',
       'create-task',
       [
-        Cl.utf8('Invalid Task'),
-        Cl.utf8('This should fail'),
+        Cl.stringUtf8('Invalid Task'),
+        Cl.stringUtf8('This should fail'),
         Cl.uint(100),
         Cl.uint(30),
         Cl.uint(5),
@@ -182,8 +182,8 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'Citizen-Science-Task-Bounties',
       'create-task',
       [
-        Cl.utf8('Biology Task'),
-        Cl.utf8('Should fail with inactive category'),
+        Cl.stringUtf8('Biology Task'),
+        Cl.stringUtf8('Should fail with inactive category'),
         Cl.uint(100),
         Cl.uint(30),
         Cl.uint(5),
@@ -204,8 +204,8 @@ describe('Citizen Science Task Bounties - Categories System', () => {
       'Citizen-Science-Task-Bounties',
       'create-task',
       [
-        Cl.utf8('Test Task'),
-        Cl.utf8('Test Description'),
+        Cl.stringUtf8('Test Task'),
+        Cl.stringUtf8('Test Description'),
         Cl.uint(100),
         Cl.uint(30),
         Cl.uint(5),

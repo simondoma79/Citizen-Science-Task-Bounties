@@ -13,6 +13,8 @@
 (define-constant err-category-inactive (err u110))
 (define-constant err-invalid-rating (err u111))
 (define-constant err-feedback-exists (err u112))
+(define-constant err-already-following (err u113))
+(define-constant err-not-following (err u114))
 
 ;; Category constants
 (define-constant category-biology "BIOLOGY")
@@ -111,6 +113,24 @@
         rating-count: uint,
         rating-total: uint,
     }
+)
+
+(define-map task-followers
+    {
+        task-id: uint,
+        user: principal,
+    }
+    { followed: bool }
+)
+
+(define-map task-follower-stats
+    { task-id: uint }
+    { follower-count: uint }
+)
+
+(define-map user-follow-stats
+    { user: principal }
+    { followed-tasks: uint }
 )
 
 ;; Initialize default categories
@@ -570,5 +590,90 @@
             u0
             (/ (get rating-total stats) count)
         )
+    )
+)
+
+(define-public (follow-task (task-id uint))
+    (let (
+            (task (map-get? tasks { task-id: task-id }))
+            (existing (map-get? task-followers {
+                task-id: task-id,
+                user: tx-sender,
+            }))
+            (current-task-stats (default-to { follower-count: u0 }
+                (map-get? task-follower-stats { task-id: task-id })
+            ))
+            (current-user-stats (default-to { followed-tasks: u0 }
+                (map-get? user-follow-stats { user: tx-sender })
+            ))
+        )
+        (asserts! (is-some task) err-not-found)
+        (asserts! (is-none existing) err-already-following)
+        (map-set task-followers {
+            task-id: task-id,
+            user: tx-sender,
+        } { followed: true }
+        )
+        (map-set task-follower-stats { task-id: task-id } { follower-count: (+ (get follower-count current-task-stats) u1) })
+        (map-set user-follow-stats { user: tx-sender } { followed-tasks: (+ (get followed-tasks current-user-stats) u1) })
+        (ok true)
+    )
+)
+
+(define-public (unfollow-task (task-id uint))
+    (let (
+            (task (map-get? tasks { task-id: task-id }))
+            (existing (map-get? task-followers {
+                task-id: task-id,
+                user: tx-sender,
+            }))
+            (current-task-stats (default-to { follower-count: u0 }
+                (map-get? task-follower-stats { task-id: task-id })
+            ))
+            (current-user-stats (default-to { followed-tasks: u0 }
+                (map-get? user-follow-stats { user: tx-sender })
+            ))
+            (task-follower-count (get follower-count current-task-stats))
+            (user-followed-count (get followed-tasks current-user-stats))
+        )
+        (asserts! (is-some task) err-not-found)
+        (asserts! (is-some existing) err-not-following)
+        (map-delete task-followers {
+            task-id: task-id,
+            user: tx-sender,
+        })
+        (map-set task-follower-stats { task-id: task-id } { follower-count: (if (> task-follower-count u0)
+            (- task-follower-count u1)
+            u0
+        ) }
+        )
+        (map-set user-follow-stats { user: tx-sender } { followed-tasks: (if (> user-followed-count u0)
+            (- user-followed-count u1)
+            u0
+        ) }
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (is-following-task
+        (task-id uint)
+        (user principal)
+    )
+    (is-some (map-get? task-followers {
+        task-id: task-id,
+        user: user,
+    }))
+)
+
+(define-read-only (get-task-follower-stats (task-id uint))
+    (default-to { follower-count: u0 }
+        (map-get? task-follower-stats { task-id: task-id })
+    )
+)
+
+(define-read-only (get-user-follow-stats (user principal))
+    (default-to { followed-tasks: u0 }
+        (map-get? user-follow-stats { user: user })
     )
 )
