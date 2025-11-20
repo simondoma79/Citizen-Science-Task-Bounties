@@ -11,6 +11,8 @@
 (define-constant err-invalid-category (err u108))
 (define-constant err-category-exists (err u109))
 (define-constant err-category-inactive (err u110))
+(define-constant err-invalid-rating (err u111))
+(define-constant err-feedback-exists (err u112))
 
 ;; Category constants
 (define-constant category-biology "BIOLOGY")
@@ -91,6 +93,26 @@
     }
 )
 
+(define-map feedback
+    {
+        task-id: uint,
+        user: principal,
+    }
+    {
+        rating: uint,
+        comment: (string-utf8 200),
+        created-at: uint,
+    }
+)
+
+(define-map task-rating-stats
+    { task-id: uint }
+    {
+        rating-count: uint,
+        rating-total: uint,
+    }
+)
+
 ;; Initialize default categories
 (map-set categories { name: category-biology } {
     active: true,
@@ -140,7 +162,9 @@
     )
     (begin
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-        (asserts! (is-none (map-get? categories { name: name })) err-category-exists)
+        (asserts! (is-none (map-get? categories { name: name }))
+            err-category-exists
+        )
         (map-set categories { name: name } {
             active: true,
             description: description,
@@ -156,12 +180,8 @@
     )
 )
 
-(define-public (toggle-category-status
-        (name (string-ascii 20))
-    )
-    (let (
-            (category (unwrap! (map-get? categories { name: name }) err-not-found))
-        )
+(define-public (toggle-category-status (name (string-ascii 20)))
+    (let ((category (unwrap! (map-get? categories { name: name }) err-not-found)))
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (map-set categories { name: name }
             (merge category { active: (not (get active category)) })
@@ -199,7 +219,9 @@
     )
     (let (
             (task-id (+ u1 (var-get total-supply)))
-            (category-info (unwrap! (map-get? categories { name: category }) err-invalid-category))
+            (category-info (unwrap! (map-get? categories { name: category })
+                err-invalid-category
+            ))
             (current-stats (default-to {
                 total-tasks: u0,
                 active-tasks: u0,
@@ -259,15 +281,13 @@
             verified: false,
         })
         (if (>= new-observation-count (get required-observations task))
-            (let (
-                    (current-stats (default-to {
-                        total-tasks: u0,
-                        active-tasks: u0,
-                        completed-tasks: u0,
-                    }
-                        (map-get? category-stats { category: (get category task) })
-                    ))
-                )
+            (let ((current-stats (default-to {
+                    total-tasks: u0,
+                    active-tasks: u0,
+                    completed-tasks: u0,
+                }
+                    (map-get? category-stats { category: (get category task) })
+                )))
                 (map-set tasks { task-id: task-id }
                     (merge task {
                         current-observations: new-observation-count,
@@ -437,7 +457,7 @@
     )
 )
 
-(define-read-only (get-task-by-id-and-check-category 
+(define-read-only (get-task-by-id-and-check-category
         (task-id uint)
         (category (string-ascii 20))
     )
@@ -469,4 +489,86 @@
 
 (define-read-only (count-tasks-in-category (category (string-ascii 20)))
     (get total-tasks (get-category-stats category))
+)
+
+(define-public (leave-feedback
+        (task-id uint)
+        (rating uint)
+        (comment (string-utf8 200))
+    )
+    (let (
+            (submission (unwrap!
+                (map-get? submissions {
+                    task-id: task-id,
+                    user: tx-sender,
+                })
+                err-not-found
+            ))
+            (existing-feedback (map-get? feedback {
+                task-id: task-id,
+                user: tx-sender,
+            }))
+            (has-valid-min (>= rating u1))
+            (has-valid-max (<= rating u5))
+            (current-block burn-block-height)
+            (current-stats (default-to {
+                rating-count: u0,
+                rating-total: u0,
+            }
+                (map-get? task-rating-stats { task-id: task-id })
+            ))
+        )
+        (asserts! (and has-valid-min has-valid-max) err-invalid-rating)
+        (asserts! (is-none existing-feedback) err-feedback-exists)
+        (asserts! (get verified submission) err-invalid-submission)
+        (map-set feedback {
+            task-id: task-id,
+            user: tx-sender,
+        } {
+            rating: rating,
+            comment: comment,
+            created-at: current-block,
+        })
+        (map-set task-rating-stats { task-id: task-id } {
+            rating-count: (+ (get rating-count current-stats) u1),
+            rating-total: (+ (get rating-total current-stats) rating),
+        })
+        (ok true)
+    )
+)
+
+(define-read-only (get-feedback
+        (task-id uint)
+        (user principal)
+    )
+    (map-get? feedback {
+        task-id: task-id,
+        user: user,
+    })
+)
+
+(define-read-only (get-task-rating-stats (task-id uint))
+    (default-to {
+        rating-count: u0,
+        rating-total: u0,
+    }
+        (map-get? task-rating-stats { task-id: task-id })
+    )
+)
+
+(define-read-only (get-task-average-rating (task-id uint))
+    (let (
+            (stats (default-to {
+                rating-count: u0,
+                rating-total: u0,
+            }
+                (map-get? task-rating-stats { task-id: task-id })
+            ))
+            (count (get rating-count stats))
+        )
+        (if (is-eq count u0)
+            u0
+            (/ (get rating-total stats) count)
+        )
+    )
 )
